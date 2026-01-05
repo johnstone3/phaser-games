@@ -1,0 +1,353 @@
+// Drag and Drop Simulation for CodeGuppy - Final Puzzle v3
+// Created with the help of Gemini
+
+// -- Event Bus and UI Classes --
+
+class SimpleEventBus {
+    static events = {};
+    static on(eventName, handler) {
+        if (!SimpleEventBus.events[eventName]) { SimpleEventBus.events[eventName] = []; } 
+        SimpleEventBus.events[eventName].push(handler);
+    }
+    static emit(eventName, data) {
+        if (SimpleEventBus.events[eventName]) {
+            for (const handler of SimpleEventBus.events[eventName]) { handler(data); }
+        }
+    }
+}
+
+class Button {
+    constructor(label, x, y, w, h, color, eventName, eventData) {
+        this.label = label; this.x = x; this.y = y; this.w = w; this.h = h;
+        this.color = color; this.eventName = eventName; this.eventData = eventData;
+    }
+    draw() {
+        push();
+        stroke(0); fill(this.color); rect(this.x, this.y, this.w, this.h);
+        fill(0); textSize(13); textAlign(CENTER, CENTER);
+        noStroke();
+        text(this.label, this.x + this.w / 2, this.y + this.h / 2);
+        pop();
+    }
+    isClicked(px, py) {
+        return px > this.x && px < this.x + this.w && py > this.y && py < this.y + this.h;
+    }
+}
+
+class Dialog {
+    constructor(text, x, y, w, h) {
+        this.text = text; this.x = x; this.y = y; this.w = w; this.h = h;
+        this.isVisible = false; this.closeButtonSize = 20;
+    }
+    draw() {
+        if (!this.isVisible) return;
+        push();
+        fill(250, 240, 220); stroke(0); rect(this.x, this.y, this.w, this.h, 5);
+        fill(0); textSize(15); textAlign(LEFT, TOP);
+        noStroke();
+        textFont('Verdana');
+        text(this.text, this.x + 10, this.y + 10, this.w - 20, this.h - 20);
+        const buttonX = this.x + this.w - this.closeButtonSize - 5; const buttonY = this.y + 5;
+        fill(200, 50, 50); stroke(0); rect(buttonX, buttonY, this.closeButtonSize, this.closeButtonSize);
+        fill(255); textSize(16); textAlign(CENTER, CENTER);
+        text("X", buttonX + this.closeButtonSize / 2, buttonY + this.closeButtonSize / 2);
+        pop();
+    }
+    isCloseButtonClicked(px, py) {
+        const buttonX = this.x + this.w - this.closeButtonSize - 5; const buttonY = this.y + 5;
+        return px > buttonX && px < buttonX + this.closeButtonSize && py > buttonY && py < buttonY + this.closeButtonSize;
+    }
+    isClicked(px, py) { return px > this.x && px < this.x + this.w && py > this.y && py < this.y + this.h; }
+    show() { this.isVisible = true; }
+    hide() { this.isVisible = false; }
+}
+
+class Timer {
+    constructor(label, x, y, w, h, color, duration, onFinishCallback = null) {
+        this.label = label; this.x = x; this.y = y; this.w = w; this.h = h;
+        this.color = color; this.duration = duration; this.onFinishCallback = onFinishCallback;
+        this.state = 'IDLE'; this.startTime = 0; this.remainingTime = duration;
+    }
+    draw() {
+        push();
+        stroke(0); fill(this.color); rect(this.x, this.y, this.w, this.h);
+        fill(0); textSize(12); textAlign(CENTER, CENTER);
+        noStroke();
+        if (this.state === 'IDLE') {
+            text(this.label, this.x + this.w / 2, this.y + this.h / 2);
+        } else {
+            text(ceil(this.remainingTime), this.x + this.w / 2, this.y + this.h / 2);
+        }
+        pop();
+    }
+    update() {
+        if (this.state === 'RUNNING') {
+            const elapsedTime = (millis() - this.startTime) / 1000;
+            this.remainingTime = this.duration - elapsedTime;
+            if (this.remainingTime <= 0) {
+                this.state = 'IDLE';
+                this.remainingTime = this.duration;
+                if (typeof this.onFinishCallback === 'function') {
+                    this.onFinishCallback(this); // Pass self to the callback
+                }
+            }
+        }
+    }
+    start() {
+        if (this.state === 'IDLE') { this.state = 'RUNNING'; this.startTime = millis(); }
+    }
+    isClicked(px, py) { return px > this.x && px < this.x + this.w && py > this.y && py < this.y + this.h; }
+}
+
+// -- Core Simulation Classes --
+class Box {
+  constructor(letter, w, h, color) { this.letter = letter; this.w = w; this.h = h; this.color = color; }
+  draw(x, y) {
+    push();
+    stroke(0); fill(this.color); rect(x, y, this.w, this.h);
+    fill(0); textSize(12); textAlign(CENTER, CENTER);
+    noStroke();
+    text(this.letter, x + this.w / 2, y + this.h / 2);
+    pop();
+  }
+}
+
+class DraggableGroup {
+  constructor(x, y) { this.x = x; this.y = y; this.boxes = []; this.isDragging = false; this.offsetX = 0; this.offsetY = 0; }
+  addBox(box) { this.boxes.push(box); }
+  update() { if (this.isDragging) { this.x = mouseX - this.offsetX; this.y = mouseY - this.offsetY; } }
+  draw() {
+    let currentX = this.x;
+    for (const box of this.boxes) { box.draw(currentX, this.y); currentX += box.w; }
+  }
+  handleMousePressed() {
+    let totalWidth = 0;
+    for (const box of this.boxes) { totalWidth += box.w; }
+    const totalHeight = this.boxes.length > 0 ? this.boxes[0].h : 0;
+    if (mouseX > this.x && mouseX < this.x + totalWidth && mouseY > this.y && mouseY < this.y + totalHeight) {
+      this.isDragging = true; this.offsetX = mouseX - this.x; this.offsetY = mouseY - this.y;
+    }
+  }
+  handleMouseReleased() { this.isDragging = false; }
+}
+
+class ComparisonGrid {
+    constructor(labels, numRows, draggableGroups, x, y) {
+        this.labels = labels; this.numRows = numRows; this.draggableGroups = draggableGroups;
+        this.x = x; this.y = y; 
+        this.cellWidth = 30; this.cellHeight = 30;
+        this.numCols = labels.length; this.bottomRowDisplay = new Array(this.numCols).fill("");
+    }
+    update() {
+        this.bottomRowDisplay.fill("");
+        for (let col = 0; col < this.numCols; col++) {
+            const foundLetters = [];
+            for (let row = 0; row < this.numRows; row++) {
+                const cellX = this.x + col * this.cellWidth; const cellY = this.y + row * this.cellHeight;
+                for (const group of this.draggableGroups) {
+                    let currentBoxX = group.x;
+                    for (const box of group.boxes) {
+                        const boxCenterX = currentBoxX + box.w / 2; const boxCenterY = group.y + box.h / 2;
+                        if (boxCenterX > cellX && boxCenterX < cellX + this.cellWidth && boxCenterY > cellY && boxCenterY < cellY + this.cellHeight) {
+                            foundLetters.push(box.letter);
+                        }
+                        currentBoxX += box.w;
+                    }
+                }
+            }
+            if (foundLetters.length > 0) {
+                const firstLetter = foundLetters[0];
+                const allSame = foundLetters.every(letter => letter === firstLetter);
+                if (allSame) { this.bottomRowDisplay[col] = firstLetter; }
+            }
+        }
+    }
+    draw() {
+        push();
+        for (let col = 0; col < this.numCols; col++) {
+            for (let row = 0; row < this.numRows; row++) {
+                const cellX = this.x + col * this.cellWidth; const cellY = this.y + row * this.cellHeight;
+                stroke(200); noFill(); rect(cellX, cellY, this.cellWidth, this.cellHeight);
+            }
+            const bottomCellX = this.x + col * this.cellWidth; const bottomCellY = this.y + this.numRows * this.cellHeight;
+            stroke(0); fill(240); rect(bottomCellX, bottomCellY, this.cellWidth, this.cellHeight);
+            fill(0); textSize(12); textAlign(CENTER, CENTER); noStroke();
+            text(this.bottomRowDisplay[col], bottomCellX + this.cellWidth / 2, bottomCellY + this.cellHeight / 2);
+        }
+        pop();
+    }
+}
+
+// The Context class manages the entire scene
+class Context {
+    constructor() {
+        this.draggableGroups = []; this.comparisonGrids = [];
+        this.buttons = []; this.dialogs = []; this.timers = [];
+        this.wasMousePressed = false;
+    }
+
+    init() {
+        textAlign(CENTER, CENTER);
+        
+        const groupSeries = [
+            [ ["Gly","Ile","Val","Glu","Gln"], ["Cys","Cys","Ala"], ["Ser","Val","Cys","Ser","Leu","Tyr","Gln"], ["Asn","Tyr","Cys","Asn"] ],
+            [
+              ["Val","Glu","Gln","Cys","Cys","Ala","Ser","Val"],
+              ["Ala","Ser","Val","Cys","Ser","Leu","Tyr"]
+            ],
+            [
+              ["Gly","Ile","Val","Glu","Gln","Cys"],
+              ["Cys","Cys","Ala","Ser","Val","Cys"],
+              ["Cys","Ser","Leu","Tyr","Gln","Leu"],
+              ["Gln","Leu","Glu","Asn","Tyr","Cys","Asn"]
+            ]
+        ];
+        const peptideSequenceLabels = ["Gly", "Ile", "Val", "Glu", "Gln", "Cys", "Cys", "Ala", "Ser", "Val", "Cys", "Ser", "Leu", "Tyr", "Gln", "Leu", "Glu", "Asn", "Tyr", "Cys", "Asn"];
+
+        // --- Setup UI Elements ---
+
+        const button_width = 90;
+        const button_height = 30;
+        const button_spacing = 10;
+        const button_y = 10;
+        const total_buttons_width = (3 * button_width) + (2 * button_spacing);
+        const start_x = (width / 2) - (total_buttons_width / 2);
+        
+        const createSeriesAndDisappear = (timerInstance) => {
+            const seriesIndex = timerInstance.seriesIndex;
+            groupSeries[seriesIndex].forEach(labels => this.createGroup(labels));
+            this.timers = this.timers.filter(t => t !== timerInstance);
+        };
+
+        const timer1 = new Timer("Štiepenie 1", start_x, button_y, button_width, button_height, "cyan", 3, createSeriesAndDisappear);
+        timer1.seriesIndex = 0;
+        this.timers.push(timer1);
+
+        const timer2 = new Timer("Štiepenie 2", start_x + button_width + button_spacing, button_y, button_width, button_height, "pink", 3, createSeriesAndDisappear);
+        timer2.seriesIndex = 1;
+        this.timers.push(timer2);
+        
+        const timer3 = new Timer("Štiepenie 3", start_x + 2 * (button_width + button_spacing), button_y, button_width, button_height, "yellow", 3, createSeriesAndDisappear);
+        timer3.seriesIndex = 2;
+        this.timers.push(timer3);
+        
+        // --- Setup Dialogs ---
+        this.welcomeDialog = new Dialog("Tvojou úlohou je odhaliť správnu a presnú aminokyselinovú sekvenciu „Sangerovho prvého proteínu“.\n1. Klikni Štiepenie 1. Objavia sa fragmenty proteínu, ktoré treba poskladať. Len ako?\n2. Klikni Štiepenie 2. a neskôr 3. Objavia sa fragmenty toho istého proteínu, ale naštiepené inak.\n3. Na základe prekryvov zo štiepení 1-3 nájdi správnu sekvenciu.\n4. Jednotlivé sekvencie posúvaj do štvorčekovej siete.\nMalá pomôcka: Sekvencia nášho proteínu začína aminokyselinou glycín (Gly). Veľa šťastia!", (width / 2) - 300, (height / 2) - 120, 600, 240);
+        this.dialogs.push(this.welcomeDialog);
+        this.welcomeDialog.show();
+        this.finalDialog = new Dialog("Gratulujeme!\nZhoda s peptidovou sekvenciou!", (width / 2) - 150, (height / 2) - 50, 300, 100);
+        this.dialogs.push(this.finalDialog);
+        this.failureDialog = new Dialog("Ojoj! Sekvencia sa zatiaľ nezhoduje. Skúste to znova!", (width / 2) - 150, (height / 2) - 50, 300, 100);
+        this.dialogs.push(this.failureDialog);
+
+        // --- Setup Comparison Grid ---
+        const gridCellSize = 30; const gridNumRows = 10;
+        const gridWidth = peptideSequenceLabels.length * gridCellSize;
+        const gridX = (width / 2) - (gridWidth / 2); const gridY = 150;
+        const grid = new ComparisonGrid(peptideSequenceLabels, gridNumRows, this.draggableGroups, gridX, gridY);
+        this.comparisonGrids.push(grid);
+
+        // --- Setup Bottom Button ---
+        const evaluateButton = new Button("Skontroluj sekvenciu", gridX + (gridWidth / 2) - 70, gridY + (gridNumRows + 1) * gridCellSize + 20, 140, 30, "lightgreen", "EvaluateButtonClicked", {});
+        this.buttons.push(evaluateButton);
+
+        // --- Setup Event Listeners ---
+        
+        SimpleEventBus.on("EvaluateButtonClicked", () => {
+            if (grid) {
+                const isSolved = grid.labels.every((label, index) => label === grid.bottomRowDisplay[index]);
+                if (isSolved) { showScene("Congrats"); } 
+                else { this.failureDialog.show(); }
+            }
+        });
+    }
+
+    createGroup(labels) {
+        const groupWidth = labels.length * 30;
+        const spawnX = random(10, width - groupWidth - 10);
+        const spawnY = random(50, 110);
+        let newGroup = new DraggableGroup(spawnX, spawnY);
+        for (const label of labels) {
+            let r = floor(random(100, 255)); let g = floor(random(100, 255)); let b = floor(random(100, 255));
+            let randomColor = color(r, g, b);
+            let newBox = new Box(label, 30, 30, randomColor);
+            newGroup.addBox(newBox);
+        }
+        this.draggableGroups.push(newGroup); return newGroup;
+    }
+
+    update() {
+        for (const timer of this.timers) { timer.update(); }
+        for (const group of this.draggableGroups) { group.update(); }
+        for (const grid of this.comparisonGrids) { grid.update(); }
+    }
+
+    draw() {
+        for (const group of this.draggableGroups) { group.draw(); }
+        for (const grid of this.comparisonGrids) { grid.draw(); }
+        for (const button of this.buttons) { button.draw(); }
+        for (const timer of this.timers) { timer.draw(); }
+        for (const dialog of this.dialogs) { dialog.draw(); }
+
+        // Info text for evaluation button
+        textSize(13);
+        textAlign(CENTER, CENTER);
+        fill("black");
+        noStroke();
+        text("Ak si myslíš, že máš poskladanú celú sekvenciu správne, klikni na tlačidlo 'Skontroluj sekvenciu'.", width / 2, 560);
+    }
+
+    handleMousePressed() {
+        for (const dialog of this.dialogs) {
+            if (dialog.isVisible) {
+                if (dialog.isCloseButtonClicked(mouseX, mouseY)) { dialog.hide(); return; }
+                if (dialog.isClicked(mouseX, mouseY)) { return; }
+            }
+        }
+        for (const button of this.buttons) {
+            if (button.isClicked(mouseX, mouseY)) { SimpleEventBus.emit(button.eventName, button.eventData); return; }
+        }
+        for (const timer of this.timers) {
+            if (timer.isClicked(mouseX, mouseY)) { timer.start(); return; }
+        }
+        for (const group of this.draggableGroups) { group.handleMousePressed(); }
+    }
+
+    handleMouseReleased() { for (const group of this.draggableGroups) { group.handleMouseReleased(); } }
+
+    checkMouse() {
+        if (mouseIsPressed && !this.wasMousePressed) {
+            this.handleMousePressed();
+        }
+        if (!mouseIsPressed && this.wasMousePressed) {
+            this.handleMouseReleased();
+        }
+        this.wasMousePressed = mouseIsPressed;
+    }
+}
+
+// --- Global Variables & Main Program ---
+let context;
+let isInitialized = false;
+
+function loop() {
+  if (!isInitialized) {
+    context = new Context();
+    context.init();
+    isInitialized = true;
+  }
+  clear();
+  if (context) { context.update(); context.draw(); context.checkMouse(); }
+}
+
+function touchMoved() {
+  if (context) {
+    for (const group of context.draggableGroups) {
+        if (group.isDragging) {
+            group.update();
+        }
+    }
+  }
+  return false;
+}
+
