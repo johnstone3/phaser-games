@@ -1,0 +1,22 @@
+{
+  "name": "puzzle-frederick-sanger",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "format": "biome format --write .",
+    "lint": "biome lint .",
+    "tsc": "tsc --noEmit",
+    "build": "vite build --outDir ../docs/puzzle-frederick-sanger --emptyOutDir",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.11",
+    "typescript": "^5.9.3",
+    "vite": "^6.3.5"
+  },
+  "dependencies": {
+    "phaser": "^3.90.0"
+  }
+}
